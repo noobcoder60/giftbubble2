@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="GiftBubble Music API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-auth_state = {"url": "", "code": "", "done": False, "error": ""}
+auth_state = {"url": "", "code": "", "done": False, "error": "", "started": False}
 
 def _init_yt():
     global yt
@@ -37,49 +37,60 @@ _init_yt()
 
 def _do_oauth():
     try:
-        old = sys.stdout
-        buf = StringIO()
-        sys.stdout = buf
-        try:
-            setup_oauth("oauth.json", open_browser=False)
-        except EOFError:
-            pass
-        except Exception as e:
-            if "authorization_pending" in str(e).lower() or "expired" in str(e).lower():
-                pass
-        finally:
-            sys.stdout = old
+        auth_state["url"] = ""
+        auth_state["code"] = ""
 
-        out = buf.getvalue()
-        for line in out.split("\n"):
-            if "http" in line.lower() and "google" in line.lower():
-                auth_state["url"] = line.strip()
-            if line.strip() and "code" in line.lower() and ":" in line:
-                parts = line.split(":")
-                if len(parts) > 1:
-                    auth_state["code"] = parts[-1].strip()
-
-        if os.path.exists("oauth.json"):
-            auth_state["done"] = True
-            _init_yt()
-    except Exception as e:
-        auth_state["error"] = str(e)
-
-@app.get("/debug")
-def debug():
-    info = {}
-    try:
-        import ytmusicapi
-        info["version"] = ytmusicapi.__version__
-    except:
-        info["version"] = "?"
-    try:
+        # Use Google OAuth device code flow
         import importlib
         mod = importlib.import_module("ytmusicapi.auth.oauth")
-        info["oauth_attrs"] = [x for x in dir(mod) if not x.startswith("_")]
+        client_id = getattr(mod, "YT_CLIENT_ID", None)
+        client_secret = getattr(mod, "YT_CLIENT_SECRET", None)
+
+        import requests as req
+
+        # Get device code
+        resp = req.post("https://oauth2.googleapis.com/device/code", data={
+            "client_id": client_id,
+            "scope": "https://www.googleapis.com/auth/youtube"
+        }, timeout=10)
+        code_data = resp.json()
+
+        auth_state["url"] = code_data.get("verification_url", "https://www.google.com/device")
+        auth_state["code"] = code_data.get("user_code", "")
+        device_code = code_data.get("device_code", "")
+        interval = code_data.get("interval", 5)
+
+        logger.info(f"OAuth URL: {auth_state['url']}, code: {auth_state['code']}")
+
+        # Poll for token
+        for i in range(120):
+            time.sleep(interval)
+            resp = req.post("https://oauth2.googleapis.com/token", data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "device_code": device_code,
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
+            }, timeout=10)
+            data = resp.json()
+            if resp.status_code == 200:
+                # Save in ytmusicapi format
+                token = {
+                    "access_token": data["access_token"],
+                    "refresh_token": data.get("refresh_token", ""),
+                    "expires_in": data.get("expires_in", 3600),
+                    "scope": data.get("scope", ""),
+                    "token_type": data.get("token_type", "Bearer")
+                }
+                with open("oauth.json", "w") as f:
+                    json.dump(token, f)
+                auth_state["done"] = True
+                _init_yt()
+                return
+            if data.get("error") == "access_denied":
+                auth_state["error"] = "Access denied"
+                return
     except Exception as e:
-        info["error"] = str(e)[:100]
-    return JSONResponse(content=info)
+        auth_state["error"] = f"{type(e).__name__}: {str(e)[:100]}"
 
 @app.get("/search")
 def search(q: str = ""):
@@ -173,12 +184,11 @@ def stream(videoId: str = ""):
 def auth_url():
     if auth_state["done"]:
         return JSONResponse(content={"done": True, "message": "Already authenticated"}, status_code=200)
-    auth_state["url"] = ""
-    auth_state["code"] = ""
-    auth_state["error"] = ""
-    thread = threading.Thread(target=_do_oauth, daemon=True)
-    thread.start()
-    time.sleep(3)
+    if not auth_state["started"]:
+        auth_state["started"] = True
+        thread = threading.Thread(target=_do_oauth, daemon=True)
+        thread.start()
+        time.sleep(2)
     return JSONResponse(content={
         "url": auth_state["url"],
         "code": auth_state["code"],
@@ -192,6 +202,18 @@ def auth_status():
         "done": auth_state["done"],
         "error": auth_state["error"]
     }, status_code=200)
+
+@app.get("/debug")
+def debug():
+    try:
+        import importlib
+        mod = importlib.import_module("ytmusicapi.auth.oauth")
+        return JSONResponse(content={
+            "has_id": bool(getattr(mod, "YT_CLIENT_ID", None)),
+            "has_secret": bool(getattr(mod, "YT_CLIENT_SECRET", None))
+        })
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)[:100]})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
