@@ -43,21 +43,27 @@ except Exception as e:
 
 def _do_oauth():
     try:
-        from io import StringIO
-        import sys
-        old_stdout = sys.stdout
-        sys.stdout = StringIO()
+        # Try different OAuth import paths
         try:
-            from ytmusicapi import setup_oauth
-            setup_oauth("oauth.json", open_browser=False)
-        finally:
-            output = sys.stdout.getvalue()
-            sys.stdout = old_stdout
-        for line in output.split("\n"):
-            if "URL" in line or "http" in line.lower():
-                auth_state["url"] = line.strip()
-            if "code" in line.lower() and ":" in line:
-                auth_state["code"] = line.split(":")[-1].strip()
+            from ytmusicapi.auth.oauth import OAuth
+        except ImportError:
+            try:
+                from ytmusicapi.oauth import OAuth
+            except ImportError:
+                from ytmusicapi import setup_oauth
+                setup_oauth("oauth.json", open_browser=False)
+                auth_state["done"] = True
+                _init_yt()
+                return
+
+        import sys
+        oauth = OAuth()
+        device_code = oauth.get_code()
+        auth_state["url"] = device_code.verification_url
+        auth_state["code"] = device_code.user_code
+        logger.info(f"OAuth URL: {device_code.verification_url}")
+        oauth.verify(device_code, timeout=120)
+        oauth.save("oauth.json")
         auth_state["done"] = True
         _init_yt()
         logger.info("OAuth completed successfully")
@@ -132,6 +138,26 @@ def song(videoId: str = ""):
         }, status_code=200)
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@app.get("/debug")
+def debug():
+    import importlib
+    info = {
+        "oauth_paths": {}
+    }
+    for path in ["ytmusicapi.auth.oauth", "ytmusicapi.oauth",
+                  "ytmusicapi.auth", "ytmusicapi.setup"]:
+        try:
+            importlib.import_module(path)
+            info["oauth_paths"][path] = "ok"
+        except Exception as e:
+            info["oauth_paths"][path] = str(e)[:60]
+    try:
+        import ytmusicapi
+        info["version"] = ytmusicapi.__version__
+    except:
+        info["version"] = "unknown"
+    return JSONResponse(content=info)
 
 @app.get("/stream")
 def stream(videoId: str = ""):
