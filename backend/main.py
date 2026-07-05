@@ -2,8 +2,9 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
-from pytubefix import YouTube
 import uvicorn
+import subprocess
+import json
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -78,14 +79,14 @@ def stream(videoId: str = ""):
     if not videoId:
         return JSONResponse(content={"error": "videoId required"}, status_code=400)
     try:
-        yt_obj = YouTube(f"https://www.youtube.com/watch?v={videoId}")
-        audio = yt_obj.streams.get_audio_only()
-        if audio and audio.url:
-            return JSONResponse(content={"url": audio.url}, status_code=200)
-        video = yt_obj.streams.filter(only_audio=True).first()
-        if video and video.url:
-            return JSONResponse(content={"url": video.url}, status_code=200)
-        return JSONResponse(content={"url": "", "error": "No audio stream found"}, status_code=200)
+        result = subprocess.run(
+            ["yt-dlp", "-f", "bestaudio", "--get-url",
+             f"https://www.youtube.com/watch?v={videoId}"],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return JSONResponse(content={"url": result.stdout.strip()}, status_code=200)
+        return JSONResponse(content={"url": "", "error": result.stderr.strip()}, status_code=200)
     except Exception as e:
         logger.error(f"Stream error: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
