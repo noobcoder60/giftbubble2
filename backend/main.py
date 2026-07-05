@@ -97,10 +97,12 @@ def debug():
         info["version"] = "?"
     try:
         import importlib
-        mod = importlib.import_module("ytmusicapi.auth.oauth")
-        info["attrs"] = [x for x in dir(mod) if not x.startswith("_")]
-    except:
-        info["attrs"] = []
+        mod = importlib.import_module("ytmusicapi")
+        info["top_level"] = [x for x in dir(mod) if not x.startswith("_")]
+        mod2 = importlib.import_module("ytmusicapi.auth")
+        info["auth_attrs"] = [x for x in dir(mod2) if not x.startswith("_")]
+    except Exception as e:
+        info["error"] = str(e)[:100]
     return JSONResponse(content=info)
 
 @app.get("/search")
