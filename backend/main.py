@@ -91,6 +91,8 @@ def stream(videoId: str = ""):
 
         result = subprocess.run(
             [sys.executable, "-m", "yt_dlp", "-f", "bestaudio", "--get-url",
+             "--extractor-args", "youtube:player_client=android",
+             "--quiet", "--no-warnings",
              f"https://www.youtube.com/watch?v={videoId}"],
             capture_output=True, text=True, timeout=30
         )
