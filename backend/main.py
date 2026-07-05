@@ -56,14 +56,38 @@ def _do_oauth():
             if isinstance(device_code, dict):
                 auth_state["url"] = device_code.get("verification_url", "")
                 auth_state["code"] = device_code.get("user_code", "")
-                logger.info(f"OAuth URL: {auth_state['url']}")
-                oauth.verify(device_code, timeout=120)
+                auth_state["device_code"] = device_code.get("device_code", "")
             else:
-                auth_state["url"] = device_code.verification_url
-                auth_state["code"] = device_code.user_code
-                logger.info(f"OAuth URL: {auth_state['url']}")
-                oauth.verify(device_code, timeout=120)
-            oauth.save("oauth.json")
+                auth_state["url"] = getattr(device_code, "verification_url", "")
+                auth_state["code"] = getattr(device_code, "user_code", "")
+                auth_state["device_code"] = getattr(device_code, "device_code", "")
+            logger.info(f"OAuth URL: {auth_state['url']}, code: {auth_state['code']}")
+
+            # Poll Google OAuth token endpoint until user authenticates
+            import requests as req
+            for i in range(120):
+                time.sleep(5)
+                try:
+                    resp = req.post("https://oauth2.googleapis.com/token", data={
+                        "client_id": oauth.client_id,
+                        "client_secret": oauth.client_secret,
+                        "device_code": auth_state["device_code"],
+                        "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
+                    }, timeout=10)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        oauth.token = data
+                        oauth.save("oauth.json")
+                        auth_state["done"] = True
+                        _init_yt()
+                        logger.info("OAuth completed")
+                        return
+                except Exception as e:
+                    if "authorization_pending" in str(e).lower():
+                        continue
+                    if "access_denied" in str(e).lower():
+                        auth_state["error"] = "Access denied"
+                        return
             auth_state["done"] = True
             _init_yt()
             logger.info("OAuth completed")
