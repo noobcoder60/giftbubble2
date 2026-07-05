@@ -175,6 +175,14 @@ def auth_url():
 def auth_status():
     return JSONResponse(content={"done": auth_state["done"], "error": auth_state["error"]})
 
+@app.get("/debug")
+def debug():
+    info = {"has_oauth": os.path.exists("oauth.json"), "yt_initialized": yt is not None}
+    if os.path.exists("oauth.json"):
+        with open("oauth.json") as f:
+            info["token_keys"] = list(json.load(f).keys())
+    return JSONResponse(content=info)
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
