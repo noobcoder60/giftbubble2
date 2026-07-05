@@ -9,6 +9,7 @@ import time
 import json
 import os
 import logging
+from io import StringIO
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -45,28 +46,51 @@ def _do_oauth():
     try:
         import importlib
         mod = importlib.import_module("ytmusicapi.auth.oauth")
+        attrs = [x for x in dir(mod) if not x.startswith("_")]
+        logger.info(f"oauth module attrs: {attrs}")
+
         OAuth = getattr(mod, "OAuth", None)
-        if OAuth is None:
-            from ytmusicapi import setup_oauth
+        if OAuth is not None:
+            oauth = OAuth()
+            device_code = oauth.get_code()
+            auth_state["url"] = device_code.verification_url
+            auth_state["code"] = device_code.user_code
+            logger.info(f"OAuth URL: {device_code.verification_url}")
+            oauth.verify(device_code, timeout=120)
+            oauth.save("oauth.json")
+            auth_state["done"] = True
+            _init_yt()
+            logger.info("OAuth completed")
+            return
+
+        from ytmusicapi import setup_oauth
+        old_stdin = sys.stdin
+        sys.stdin = StringIO()
+        try:
             setup_oauth("oauth.json", open_browser=False)
             auth_state["done"] = True
             _init_yt()
-            return
-
-        import sys
-        oauth = OAuth()
-        device_code = oauth.get_code()
-        auth_state["url"] = device_code.verification_url
-        auth_state["code"] = device_code.user_code
-        logger.info(f"OAuth URL: {device_code.verification_url}")
-        oauth.verify(device_code, timeout=120)
-        oauth.save("oauth.json")
-        auth_state["done"] = True
-        _init_yt()
-        logger.info("OAuth completed successfully")
+        finally:
+            sys.stdin = old_stdin
     except Exception as e:
         auth_state["error"] = str(e)
         logger.error(f"OAuth failed: {e}")
+
+@app.get("/debug")
+def debug():
+    info = {}
+    try:
+        import importlib
+        mod = importlib.import_module("ytmusicapi.auth.oauth")
+        info["oauth_attrs"] = [x for x in dir(mod) if not x.startswith("_")]
+    except Exception as e:
+        info["error"] = str(e)[:100]
+    try:
+        import ytmusicapi
+        info["version"] = ytmusicapi.__version__
+    except:
+        info["version"] = "unknown"
+    return JSONResponse(content=info)
 
 @app.get("/search")
 def search(q: str = ""):
@@ -135,26 +159,6 @@ def song(videoId: str = ""):
         }, status_code=200)
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
-
-@app.get("/debug")
-def debug():
-    import importlib
-    info = {
-        "oauth_paths": {}
-    }
-    for path in ["ytmusicapi.auth.oauth", "ytmusicapi.oauth",
-                  "ytmusicapi.auth", "ytmusicapi.setup"]:
-        try:
-            importlib.import_module(path)
-            info["oauth_paths"][path] = "ok"
-        except Exception as e:
-            info["oauth_paths"][path] = str(e)[:60]
-    try:
-        import ytmusicapi
-        info["version"] = ytmusicapi.__version__
-    except:
-        info["version"] = "unknown"
-    return JSONResponse(content=info)
 
 @app.get("/stream")
 def stream(videoId: str = ""):
