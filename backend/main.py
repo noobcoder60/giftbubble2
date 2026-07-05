@@ -60,6 +60,7 @@ def _do_oauth():
             if r.status_code == 200:
                 token = {"access_token": data["access_token"],
                          "refresh_token": data.get("refresh_token", ""),
+                         "expires_at": int(time.time()) + data.get("expires_in", 3600),
                          "expires_in": data.get("expires_in", 3600),
                          "scope": data.get("scope", ""),
                          "token_type": data.get("token_type", "Bearer")}
@@ -174,6 +175,18 @@ def auth_url():
 @app.get("/auth-status")
 def auth_status():
     return JSONResponse(content={"done": auth_state["done"], "error": auth_state["error"]})
+
+@app.get("/reset-auth")
+def reset_auth():
+    if os.path.exists("oauth.json"):
+        os.remove("oauth.json")
+    auth_state["started"] = False
+    auth_state["done"] = False
+    auth_state["url"] = ""
+    auth_state["code"] = ""
+    auth_state["error"] = ""
+    _init_yt()
+    return JSONResponse(content={"message": "reset"})
 
 @app.get("/debug")
 def debug():
