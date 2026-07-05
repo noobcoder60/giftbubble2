@@ -1,7 +1,12 @@
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
 import uvicorn
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="GiftBubble Music API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -10,19 +15,75 @@ yt = YTMusic()
 
 @app.get("/search")
 def search(q: str = ""):
-    return yt.search(q, limit=20)
+    if not q:
+        return JSONResponse(content=[], status_code=200)
+    try:
+        results = yt.search(q, limit=20)
+        items = []
+        for r in results:
+            if r.get("resultType") == "song" or r.get("videoId"):
+                items.append({
+                    "title": r.get("title", ""),
+                    "videoId": r.get("videoId", ""),
+                    "artist": r.get("artists", [{}])[0].get("name", "") if r.get("artists") else "",
+                    "thumbnails": r.get("thumbnails", []),
+                    "duration": r.get("duration", "")
+                })
+        return JSONResponse(content=items, status_code=200)
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/home")
 def home():
-    return yt.get_home(limit=20)
+    try:
+        results = yt.get_home(limit=10)
+        sections = []
+        for section in results:
+            title = section.get("title", "")
+            contents = section.get("contents", [])
+            items = []
+            for c in contents:
+                playlist_id = c.get("playlistId", "")
+                if c.get("videoId"):
+                    items.append({
+                        "title": c.get("title", ""),
+                        "videoId": c.get("videoId", ""),
+                        "artist": c.get("artist", c.get("description", "")),
+                        "thumbnail": c.get("thumbnails", [{}])[0].get("url", "") if c.get("thumbnails") else ""
+                    })
+                elif playlist_id:
+                    items.append({
+                        "title": c.get("title", ""),
+                        "playlistId": playlist_id,
+                        "description": c.get("description", ""),
+                        "thumbnail": c.get("thumbnails", [{}])[0].get("url", "") if c.get("thumbnails") else ""
+                    })
+            if items:
+                sections.append({"title": title, "items": items})
+        return JSONResponse(content=sections, status_code=200)
+    except Exception as e:
+        logger.error(f"Home error: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/song")
 def song(videoId: str = ""):
-    return yt.get_song(videoId) if videoId else {"error": "videoId required"}
+    if not videoId:
+        return JSONResponse(content={"error": "videoId required"}, status_code=400)
+    try:
+        return JSONResponse(content=yt.get_song(videoId), status_code=200)
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/stream")
 def stream(videoId: str = ""):
-    return {"url": yt.get_stream(videoId)} if videoId else {"error": "videoId required"}
+    if not videoId:
+        return JSONResponse(content={"error": "videoId required"}, status_code=400)
+    try:
+        url = yt.get_stream(videoId)
+        return JSONResponse(content={"url": url}, status_code=200)
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 if __name__ == "__main__":
     import os
