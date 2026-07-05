@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
 import uvicorn
+import sys
 import subprocess
 import json
 import logging
@@ -79,8 +80,17 @@ def stream(videoId: str = ""):
     if not videoId:
         return JSONResponse(content={"error": "videoId required"}, status_code=400)
     try:
+        # Ensure yt-dlp is installed
         result = subprocess.run(
-            ["python", "-m", "yt_dlp", "-f", "bestaudio", "--get-url",
+            [sys.executable, "-m", "yt_dlp", "--version"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode != 0:
+            subprocess.run([sys.executable, "-m", "pip", "install", "yt-dlp", "-q"],
+                           check=True, capture_output=True, timeout=120)
+
+        result = subprocess.run(
+            [sys.executable, "-m", "yt_dlp", "-f", "bestaudio", "--get-url",
              f"https://www.youtube.com/watch?v={videoId}"],
             capture_output=True, text=True, timeout=30
         )
