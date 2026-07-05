@@ -37,39 +37,31 @@ _init_yt()
 
 def _do_oauth():
     try:
-        from ytmusicapi.auth.oauth import YT_CLIENT_ID, YT_CLIENT_SECRET
-        import requests as req
+        old = sys.stdout
+        buf = StringIO()
+        sys.stdout = buf
+        try:
+            setup_oauth("oauth.json", open_browser=False)
+        except EOFError:
+            pass
+        except Exception as e:
+            if "authorization_pending" in str(e).lower() or "expired" in str(e).lower():
+                pass
+        finally:
+            sys.stdout = old
 
-        # Step 1: Get device code
-        r = req.post("https://oauth2.googleapis.com/device/code", data={
-            "client_id": YT_CLIENT_ID,
-            "scope": "https://www.googleapis.com/auth/youtube"
-        }, timeout=10)
-        dc = r.json()
-        auth_state["url"] = dc.get("verification_url", "https://www.google.com/device")
-        auth_state["code"] = dc.get("user_code", "")
-        auth_state["device_code"] = dc.get("device_code", "")
-        interval = dc.get("interval", 5)
+        out = buf.getvalue()
+        for line in out.split("\n"):
+            if "http" in line.lower() and "google" in line.lower():
+                auth_state["url"] = line.strip()
+            if line.strip() and "code" in line.lower() and ":" in line:
+                parts = line.split(":")
+                if len(parts) > 1:
+                    auth_state["code"] = parts[-1].strip()
 
-        # Step 2: Poll for token
-        for _ in range(120):
-            time.sleep(interval)
-            r = req.post("https://oauth2.googleapis.com/token", data={
-                "client_id": YT_CLIENT_ID,
-                "client_secret": YT_CLIENT_SECRET,
-                "device_code": auth_state["device_code"],
-                "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
-            }, timeout=10)
-            body = r.json()
-            if r.status_code == 200:
-                with open("oauth.json", "w") as f:
-                    json.dump(body, f)
-                auth_state["done"] = True
-                _init_yt()
-                return
-            if body.get("error") not in ("authorization_pending", None):
-                auth_state["error"] = body.get("error", "Unknown error")
-                return
+        if os.path.exists("oauth.json"):
+            auth_state["done"] = True
+            _init_yt()
     except Exception as e:
         auth_state["error"] = str(e)
 
