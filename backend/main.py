@@ -21,14 +21,13 @@ def search(q: str = ""):
         results = yt.search(q, filter="songs", limit=20)
         items = []
         for r in results:
-            if r.get("resultType") == "song" or r.get("videoId"):
-                items.append({
-                    "title": r.get("title", ""),
-                    "videoId": r.get("videoId", ""),
-                    "artist": r.get("artists", [{}])[0].get("name", "") if r.get("artists") else "",
-                    "thumbnails": r.get("thumbnails", []),
-                    "duration": r.get("duration", "")
-                })
+            items.append({
+                "title": r.get("title", ""),
+                "videoId": r.get("videoId", ""),
+                "artist": r.get("artists", [{}])[0].get("name", "") if r.get("artists") else "",
+                "thumbnails": r.get("thumbnails", []),
+                "duration": r.get("duration", "")
+            })
         return JSONResponse(content=items, status_code=200)
     except Exception as e:
         logger.error(f"Search error: {e}")
@@ -44,19 +43,11 @@ def home():
             contents = section.get("contents", [])
             items = []
             for c in contents:
-                playlist_id = c.get("playlistId", "")
                 if c.get("videoId"):
                     items.append({
                         "title": c.get("title", ""),
                         "videoId": c.get("videoId", ""),
                         "artist": c.get("artist", c.get("description", "")),
-                        "thumbnail": c.get("thumbnails", [{}])[0].get("url", "") if c.get("thumbnails") else ""
-                    })
-                elif playlist_id:
-                    items.append({
-                        "title": c.get("title", ""),
-                        "playlistId": playlist_id,
-                        "description": c.get("description", ""),
                         "thumbnail": c.get("thumbnails", [{}])[0].get("url", "") if c.get("thumbnails") else ""
                     })
             if items:
@@ -82,8 +73,11 @@ def stream(videoId: str = ""):
     try:
         data = yt.get_song(videoId)
         streaming = data.get("streamingData", {})
-        adaptive = streaming.get("adaptiveFormats", [])
-        url = adaptive[-1].get("url", "") if adaptive else ""
+        formats = streaming.get("formats", []) + streaming.get("adaptiveFormats", [])
+        url = ""
+        if formats:
+            best = sorted(formats, key=lambda x: x.get("bitrate", 0), reverse=True)[0]
+            url = best.get("url", best.get("signatureCipher", ""))
         return JSONResponse(content={"url": url}, status_code=200)
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
