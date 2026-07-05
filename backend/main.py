@@ -1,14 +1,15 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from ytmusicapi import YTMusic, OAuthCredentials
+from ytmusicapi import YTMusic, setup_oauth, OAuthCredentials
 import uvicorn
 import os
+import sys
 import time
 import json
-import requests
 import threading
 import logging
+from io import StringIO
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,41 +40,43 @@ _init_yt()
 
 def _do_oauth():
     try:
-        # Step 1: Get device code
-        r = requests.post("https://oauth2.googleapis.com/device/code", data={
-            "client_id": CID, "scope": "https://www.googleapis.com/auth/youtube"
-        }, timeout=10)
-        cd = r.json()
-        auth_state["url"] = cd.get("verification_url", "https://www.google.com/device")
-        auth_state["code"] = cd.get("user_code", "")
-        dc = cd.get("device_code", "")
-        interval = cd.get("interval", 5)
+        auth_state["url"] = ""
+        auth_state["code"] = ""
 
-        # Step 2: Poll for token
-        for _ in range(120):
-            time.sleep(interval)
-            r = requests.post("https://oauth2.googleapis.com/token", data={
-                "client_id": CID, "client_secret": CSEC,
-                "device_code": dc, "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
-            }, timeout=10)
-            data = r.json()
-            if r.status_code == 200:
-                token = {"access_token": data["access_token"],
-                         "refresh_token": data.get("refresh_token", ""),
-                         "expires_at": int(time.time()) + data.get("expires_in", 3600),
-                         "expires_in": data.get("expires_in", 3600),
-                         "scope": data.get("scope", ""),
-                         "token_type": data.get("token_type", "Bearer")}
-                with open("oauth.json", "w") as f:
-                    json.dump(token, f)
-                auth_state["done"] = True
-                _init_yt()
-                return
-            if data.get("error") == "access_denied":
-                auth_state["error"] = "Access denied"
-                return
+        old = sys.stdout
+        buf = StringIO()
+        sys.stdout = buf
+
+        try:
+            setup_oauth(CID, CSEC, "oauth.json", open_browser=False)
+        except EOFError:
+            pass
+        except Exception as e:
+            logger.warning(f"setup_oauth: {e}")
+        finally:
+            sys.stdout = old
+
+        out = buf.getvalue()
+        for line in out.split("\n"):
+            l = line.strip()
+            if "http" in l.lower() and "google" in l.lower():
+                auth_state["url"] = l
+            if ":" in l and len(l) > 5 and len(l) < 30:
+                auth_state["code"] = l.split(":")[-1].strip()
+
+        if os.path.exists("oauth.json"):
+            auth_state["done"] = True
+            _init_yt()
     except Exception as e:
-        auth_state["error"] = f"{type(e).__name__}: {str(e)[:100]}"
+        auth_state["error"] = str(e)[:100]
+
+def _wait_for_auth():
+    for _ in range(120):
+        time.sleep(5)
+        if os.path.exists("oauth.json"):
+            auth_state["done"] = True
+            _init_yt()
+            return
 
 @app.get("/search")
 def search(q: str = ""):
@@ -119,19 +122,11 @@ def song(videoId: str = ""):
         return JSONResponse(content={"error": "videoId required"}, status_code=400)
     try:
         data = yt.get_song(videoId)
-        playability = data.get("playabilityStatus", {}).get("status", "")
-        streaming = data.get("streamingData", {})
-        formats = streaming.get("formats", []) + streaming.get("adaptiveFormats", [])
-        url = ""
-        for f in formats:
-            if f.get("url"):
-                url = f["url"]
-                break
         return JSONResponse(content={
             "title": data.get("videoDetails", {}).get("title", ""),
             "artist": data.get("videoDetails", {}).get("author", ""),
             "thumbnail": data.get("videoDetails", {}).get("thumbnail", {}).get("thumbnails", [{}])[0].get("url", ""),
-            "playability": playability, "url": url
+            "playability": data.get("playabilityStatus", {}).get("status", ""),
         })
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
@@ -142,7 +137,6 @@ def stream(videoId: str = ""):
         return JSONResponse(content={"error": "videoId required"}, status_code=400)
     try:
         data = yt.get_song(videoId)
-        playability = data.get("playabilityStatus", {}).get("status", "")
         streaming = data.get("streamingData", {})
         formats = streaming.get("formats", []) + streaming.get("adaptiveFormats", [])
         url = ""
@@ -150,10 +144,6 @@ def stream(videoId: str = ""):
             if f.get("url"):
                 url = f["url"]
                 break
-        if not url and playability == "LOGIN_REQUIRED":
-            return JSONResponse(content={"url": "", "needAuth": True})
-        if not url:
-            return JSONResponse(content={"url": "", "error": "No stream URL found"})
         return JSONResponse(content={"url": url})
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
@@ -166,7 +156,7 @@ def auth_url():
         auth_state["started"] = True
         thread = threading.Thread(target=_do_oauth, daemon=True)
         thread.start()
-        time.sleep(2)
+        time.sleep(3)
     return JSONResponse(content={
         "url": auth_state["url"], "code": auth_state["code"],
         "done": auth_state["done"], "error": auth_state["error"]
@@ -187,14 +177,6 @@ def reset_auth():
     auth_state["error"] = ""
     _init_yt()
     return JSONResponse(content={"message": "reset"})
-
-@app.get("/debug")
-def debug():
-    info = {"has_oauth": os.path.exists("oauth.json"), "yt_initialized": yt is not None}
-    if os.path.exists("oauth.json"):
-        with open("oauth.json") as f:
-            info["token_keys"] = list(json.load(f).keys())
-    return JSONResponse(content=info)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
