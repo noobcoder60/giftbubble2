@@ -2,8 +2,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
-from ytmusicapi.auth.oauth import OAuth
 import uvicorn
+import sys
 import threading
 import time
 import json
@@ -20,28 +20,44 @@ auth_state = {"url": "", "code": "", "done": False, "error": ""}
 
 def _init_yt():
     global yt
-    if os.path.exists("oauth.json"):
-        try:
-            yt = YTMusic("oauth.json")
-            logger.info("Authenticated YTMusic created")
-            return
-        except Exception as e:
-            logger.warning(f"Auth file failed: {e}")
-    yt = YTMusic()
-    logger.info("Unauthenticated YTMusic created")
+    try:
+        if os.path.exists("oauth.json"):
+            try:
+                yt = YTMusic("oauth.json")
+                logger.info("Authenticated YTMusic created")
+                return
+            except Exception as e:
+                logger.warning(f"Auth file failed: {e}")
+        yt = YTMusic()
+        logger.info("Unauthenticated YTMusic created")
+    except Exception as e:
+        logger.error(f"YT init failed: {e}")
+        yt = YTMusic()
 
 yt = None
-_init_yt()
+try:
+    _init_yt()
+except Exception as e:
+    logger.error(f"Startup init failed: {e}")
+    yt = YTMusic()
 
 def _do_oauth():
     try:
-        oauth = OAuth()
-        device_code = oauth.get_code()
-        auth_state["url"] = device_code.verification_url
-        auth_state["code"] = device_code.user_code
-        logger.info(f"OAuth URL: {device_code.verification_url}, code: {device_code.user_code}")
-        oauth.verify(device_code, timeout=120)
-        oauth.save("oauth.json")
+        from io import StringIO
+        import sys
+        old_stdout = sys.stdout
+        sys.stdout = StringIO()
+        try:
+            from ytmusicapi import setup_oauth
+            setup_oauth("oauth.json", open_browser=False)
+        finally:
+            output = sys.stdout.getvalue()
+            sys.stdout = old_stdout
+        for line in output.split("\n"):
+            if "URL" in line or "http" in line.lower():
+                auth_state["url"] = line.strip()
+            if "code" in line.lower() and ":" in line:
+                auth_state["code"] = line.split(":")[-1].strip()
         auth_state["done"] = True
         _init_yt()
         logger.info("OAuth completed successfully")
