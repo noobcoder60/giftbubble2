@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from ytmusicapi import YTMusic
+from ytmusicapi import YTMusic, setup_oauth
 import uvicorn
 import sys
 import threading
@@ -23,104 +23,40 @@ def _init_yt():
     global yt
     try:
         if os.path.exists("oauth.json"):
-            try:
-                yt = YTMusic("oauth.json")
-                logger.info("Authenticated YTMusic created")
-                return
-            except Exception as e:
-                logger.warning(f"Auth file failed: {e}")
+            yt = YTMusic("oauth.json")
+            logger.info("Authenticated YTMusic")
+            return
         yt = YTMusic()
-        logger.info("Unauthenticated YTMusic created")
+        logger.info("Unauthenticated YTMusic")
     except Exception as e:
-        logger.error(f"YT init failed: {e}")
+        logger.error(f"YT init: {e}")
         yt = YTMusic()
 
 yt = None
-try:
-    _init_yt()
-except Exception as e:
-    logger.error(f"Startup init failed: {e}")
-    yt = YTMusic()
+_init_yt()
 
 def _do_oauth():
     try:
-        import importlib
-        mod = importlib.import_module("ytmusicapi.auth.oauth")
-        attrs = [x for x in dir(mod) if not x.startswith("_")]
-        logger.info(f"oauth module attrs: {attrs}")
-
-        OAuth = getattr(mod, "OAuthCredentials", None)
-        if OAuth is not None:
-            oauth = OAuth()
-            device_code = oauth.get_code()
-            if isinstance(device_code, dict):
-                auth_state["url"] = device_code.get("verification_url", "")
-                auth_state["code"] = device_code.get("user_code", "")
-                auth_state["device_code"] = device_code.get("device_code", "")
-            else:
-                auth_state["url"] = getattr(device_code, "verification_url", "")
-                auth_state["code"] = getattr(device_code, "user_code", "")
-                auth_state["device_code"] = getattr(device_code, "device_code", "")
-            logger.info(f"OAuth URL: {auth_state['url']}, code: {auth_state['code']}")
-
-            # Poll Google OAuth token endpoint until user authenticates
-            import requests as req
-            for i in range(120):
-                time.sleep(5)
-                try:
-                    resp = req.post("https://oauth2.googleapis.com/token", data={
-                        "client_id": oauth.client_id,
-                        "client_secret": oauth.client_secret,
-                        "device_code": auth_state["device_code"],
-                        "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
-                    }, timeout=10)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        oauth.token = data
-                        oauth.save("oauth.json")
-                        auth_state["done"] = True
-                        _init_yt()
-                        logger.info("OAuth completed")
-                        return
-                except Exception as e:
-                    if "authorization_pending" in str(e).lower():
-                        continue
-                    if "access_denied" in str(e).lower():
-                        auth_state["error"] = "Access denied"
-                        return
-            auth_state["done"] = True
-            _init_yt()
-            logger.info("OAuth completed")
-            return
-
-        from ytmusicapi import setup_oauth
-        old_stdin = sys.stdin
-        sys.stdin = StringIO()
+        old = sys.stdout
+        buf = StringIO()
+        sys.stdout = buf
         try:
             setup_oauth("oauth.json", open_browser=False)
+        finally:
+            sys.stdout = old
+
+        out = buf.getvalue()
+        for line in out.split("\n"):
+            if "http" in line:
+                auth_state["url"] = line.strip()
+            if "code" in line.lower() and ":" in line:
+                auth_state["code"] = line.split(":")[-1].strip()
+
+        if os.path.exists("oauth.json"):
             auth_state["done"] = True
             _init_yt()
-        finally:
-            sys.stdin = old_stdin
     except Exception as e:
         auth_state["error"] = str(e)
-        logger.error(f"OAuth failed: {e}")
-
-@app.get("/debug")
-def debug():
-    info = {}
-    try:
-        import importlib
-        mod = importlib.import_module("ytmusicapi.auth.oauth")
-        info["oauth_attrs"] = [x for x in dir(mod) if not x.startswith("_")]
-    except Exception as e:
-        info["error"] = str(e)[:100]
-    try:
-        import ytmusicapi
-        info["version"] = ytmusicapi.__version__
-    except:
-        info["version"] = "unknown"
-    return JSONResponse(content=info)
 
 @app.get("/search")
 def search(q: str = ""):
@@ -139,7 +75,6 @@ def search(q: str = ""):
             })
         return JSONResponse(content=items, status_code=200)
     except Exception as e:
-        logger.error(f"Search error: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/home")
@@ -163,7 +98,6 @@ def home():
                 sections.append({"title": title, "items": items})
         return JSONResponse(content=sections, status_code=200)
     except Exception as e:
-        logger.error(f"Home error: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/song")
@@ -216,10 +150,12 @@ def stream(videoId: str = ""):
 def auth_url():
     if auth_state["done"]:
         return JSONResponse(content={"done": True, "message": "Already authenticated"}, status_code=200)
-    if not auth_state["url"]:
-        thread = threading.Thread(target=_do_oauth, daemon=True)
-        thread.start()
-        time.sleep(1)
+    auth_state["url"] = ""
+    auth_state["code"] = ""
+    auth_state["error"] = ""
+    thread = threading.Thread(target=_do_oauth, daemon=True)
+    thread.start()
+    time.sleep(3)
     return JSONResponse(content={
         "url": auth_state["url"],
         "code": auth_state["code"],
