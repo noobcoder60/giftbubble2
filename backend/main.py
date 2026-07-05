@@ -3,7 +3,6 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
 from pytubefix import YouTube
-from pytubefix.cli import on_progress
 import uvicorn
 import logging
 
@@ -79,7 +78,7 @@ def stream(videoId: str = ""):
     if not videoId:
         return JSONResponse(content={"error": "videoId required"}, status_code=400)
     try:
-        yt_obj = YouTube(f"https://www.youtube.com/watch?v={videoId}", on_progress_callback=None)
+        yt_obj = YouTube(f"https://www.youtube.com/watch?v={videoId}")
         audio = yt_obj.streams.get_audio_only()
         if audio and audio.url:
             return JSONResponse(content={"url": audio.url}, status_code=200)
