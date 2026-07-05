@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
+from pytubefix import YouTube
+from pytubefix.cli import on_progress
 import uvicorn
 import logging
 
@@ -67,8 +69,7 @@ def song(videoId: str = ""):
             "title": data.get("videoDetails", {}).get("title", ""),
             "artist": data.get("videoDetails", {}).get("author", ""),
             "thumbnail": data.get("videoDetails", {}).get("thumbnail", {}).get("thumbnails", [{}])[0].get("url", ""),
-            "playability": data.get("playabilityStatus", {}).get("status", ""),
-            "reason": data.get("playabilityStatus", {}).get("reason", "")
+            "playability": data.get("playabilityStatus", {}).get("status", "")
         }, status_code=200)
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
@@ -78,19 +79,16 @@ def stream(videoId: str = ""):
     if not videoId:
         return JSONResponse(content={"error": "videoId required"}, status_code=400)
     try:
-        data = yt.get_song(videoId)
-        playability = data.get("playabilityStatus", {}).get("status", "")
-        if playability == "LOGIN_REQUIRED":
-            return JSONResponse(content={"url": "", "needAuth": True}, status_code=200)
-        streaming = data.get("streamingData", {})
-        formats = streaming.get("formats", []) + streaming.get("adaptiveFormats", [])
-        url = ""
-        for f in formats:
-            if f.get("url"):
-                url = f["url"]
-                break
-        return JSONResponse(content={"url": url}, status_code=200)
+        yt_obj = YouTube(f"https://www.youtube.com/watch?v={videoId}", on_progress_callback=None)
+        audio = yt_obj.streams.get_audio_only()
+        if audio and audio.url:
+            return JSONResponse(content={"url": audio.url}, status_code=200)
+        video = yt_obj.streams.filter(only_audio=True).first()
+        if video and video.url:
+            return JSONResponse(content={"url": video.url}, status_code=200)
+        return JSONResponse(content={"url": "", "error": "No audio stream found"}, status_code=200)
     except Exception as e:
+        logger.error(f"Stream error: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 if __name__ == "__main__":
