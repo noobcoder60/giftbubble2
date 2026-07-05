@@ -80,7 +80,7 @@ def stream(videoId: str = ""):
         return JSONResponse(content={"error": "videoId required"}, status_code=400)
     try:
         result = subprocess.run(
-            ["yt-dlp", "-f", "bestaudio", "--get-url",
+            ["python", "-m", "yt_dlp", "-f", "bestaudio", "--get-url",
              f"https://www.youtube.com/watch?v={videoId}"],
             capture_output=True, text=True, timeout=30
         )
