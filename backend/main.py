@@ -43,18 +43,15 @@ except Exception as e:
 
 def _do_oauth():
     try:
-        # Try different OAuth import paths
-        try:
-            from ytmusicapi.auth.oauth import OAuth
-        except ImportError:
-            try:
-                from ytmusicapi.oauth import OAuth
-            except ImportError:
-                from ytmusicapi import setup_oauth
-                setup_oauth("oauth.json", open_browser=False)
-                auth_state["done"] = True
-                _init_yt()
-                return
+        import importlib
+        mod = importlib.import_module("ytmusicapi.auth.oauth")
+        OAuth = getattr(mod, "OAuth", None)
+        if OAuth is None:
+            from ytmusicapi import setup_oauth
+            setup_oauth("oauth.json", open_browser=False)
+            auth_state["done"] = True
+            _init_yt()
+            return
 
         import sys
         oauth = OAuth()
