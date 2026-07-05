@@ -53,10 +53,16 @@ def _do_oauth():
         if OAuth is not None:
             oauth = OAuth()
             device_code = oauth.get_code()
-            auth_state["url"] = device_code.verification_url
-            auth_state["code"] = device_code.user_code
-            logger.info(f"OAuth URL: {device_code.verification_url}")
-            oauth.verify(device_code, timeout=120)
+            if isinstance(device_code, dict):
+                auth_state["url"] = device_code.get("verification_url", "")
+                auth_state["code"] = device_code.get("user_code", "")
+                logger.info(f"OAuth URL: {auth_state['url']}")
+                oauth.verify(device_code, timeout=120)
+            else:
+                auth_state["url"] = device_code.verification_url
+                auth_state["code"] = device_code.user_code
+                logger.info(f"OAuth URL: {auth_state['url']}")
+                oauth.verify(device_code, timeout=120)
             oauth.save("oauth.json")
             auth_state["done"] = True
             _init_yt()
