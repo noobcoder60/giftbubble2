@@ -18,7 +18,7 @@ def search(q: str = ""):
     if not q:
         return JSONResponse(content=[], status_code=200)
     try:
-        results = yt.search(q, limit=20)
+        results = yt.search(q, filter="songs", limit=20)
         items = []
         for r in results:
             if r.get("resultType") == "song" or r.get("videoId"):
