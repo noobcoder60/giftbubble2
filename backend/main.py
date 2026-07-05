@@ -49,7 +49,7 @@ def _do_oauth():
         attrs = [x for x in dir(mod) if not x.startswith("_")]
         logger.info(f"oauth module attrs: {attrs}")
 
-        OAuth = getattr(mod, "OAuth", None)
+        OAuth = getattr(mod, "OAuthCredentials", None)
         if OAuth is not None:
             oauth = OAuth()
             device_code = oauth.get_code()
