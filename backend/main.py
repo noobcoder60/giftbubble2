@@ -37,26 +37,71 @@ _init_yt()
 
 def _do_oauth():
     try:
-        old = sys.stdout
-        buf = StringIO()
-        sys.stdout = buf
-        try:
-            setup_oauth("oauth.json", open_browser=False)
-        finally:
-            sys.stdout = old
+        import importlib
+        mod = importlib.import_module("ytmusicapi.auth.oauth")
 
-        out = buf.getvalue()
-        for line in out.split("\n"):
-            if "http" in line:
-                auth_state["url"] = line.strip()
-            if "code" in line.lower() and ":" in line:
-                auth_state["code"] = line.split(":")[-1].strip()
+        # Get client credentials from ytmusicapi
+        cid = getattr(mod, "YT_CLIENT_ID", None)
+        csec = getattr(mod, "YT_CLIENT_SECRET", None)
+        if not cid:
+            cid = getattr(mod, "CLIENT_ID", None)
+        if not csec:
+            csec = getattr(mod, "CLIENT_SECRET", None)
 
-        if os.path.exists("oauth.json"):
-            auth_state["done"] = True
-            _init_yt()
+        if not cid or not csec:
+            auth_state["error"] = f"No client credentials found in module"
+            return
+
+        import requests as req
+
+        # Step 1: Get device code
+        r = req.post("https://oauth2.googleapis.com/device/code", data={
+            "client_id": cid,
+            "scope": "https://www.googleapis.com/auth/youtube"
+        }, timeout=10)
+        dc = r.json()
+        auth_state["url"] = dc.get("verification_url", "https://www.google.com/device")
+        auth_state["code"] = dc.get("user_code", "")
+        auth_state["device_code"] = dc.get("device_code", "")
+        interval = dc.get("interval", 5)
+
+        # Step 2: Poll for token
+        for _ in range(120):
+            time.sleep(interval)
+            r = req.post("https://oauth2.googleapis.com/token", data={
+                "client_id": cid,
+                "client_secret": csec,
+                "device_code": auth_state["device_code"],
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
+            }, timeout=10)
+            body = r.json()
+            if r.status_code == 200:
+                with open("oauth.json", "w") as f:
+                    json.dump(body, f)
+                auth_state["done"] = True
+                _init_yt()
+                return
+            if body.get("error") not in ("authorization_pending", None):
+                auth_state["error"] = body.get("error", "Unknown error")
+                return
     except Exception as e:
         auth_state["error"] = str(e)
+
+@app.get("/debug")
+def debug():
+    info = {}
+    try:
+        import ytmusicapi
+        info["version"] = ytmusicapi.__version__
+    except:
+        info["version"] = "?"
+    try:
+        import importlib
+        mod = importlib.import_module("ytmusicapi.auth.oauth")
+        info["attrs"] = [x for x in dir(mod) if not x.startswith("_")]
+    except:
+        info["attrs"] = []
+    return JSONResponse(content=info)
 
 @app.get("/search")
 def search(q: str = ""):
