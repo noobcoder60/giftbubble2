@@ -80,7 +80,10 @@ def stream(videoId: str = ""):
     if not videoId:
         return JSONResponse(content={"error": "videoId required"}, status_code=400)
     try:
-        url = yt.get_stream(videoId)
+        data = yt.get_song(videoId)
+        streaming = data.get("streamingData", {})
+        adaptive = streaming.get("adaptiveFormats", [])
+        url = adaptive[-1].get("url", "") if adaptive else ""
         return JSONResponse(content={"url": url}, status_code=200)
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
