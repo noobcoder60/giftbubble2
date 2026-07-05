@@ -1,3 +1,4 @@
 fastapi==0.115.*
 uvicorn==0.34.*
 ytmusicapi==1.10.*
+pytubefix>=7.0.0
