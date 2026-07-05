@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from ytmusicapi import YTMusic, setup_oauth
+from ytmusicapi import YTMusic
 import uvicorn
 import sys
 import threading
@@ -37,47 +37,52 @@ _init_yt()
 
 def _do_oauth():
     try:
-        # Use setup_oauth which handles the device code flow internally
-        old_out = sys.stdout
-        buf = StringIO()
-        sys.stdout = buf
+        import importlib
+        const = importlib.import_module("ytmusicapi.constants")
+        cid = getattr(const, "OAUTH_CLIENT_ID", None) or getattr(const, "YT_CLIENT_ID", None) or getattr(const, "CLIENT_ID", None)
+        csec = getattr(const, "OAUTH_CLIENT_SECRET", None) or getattr(const, "YT_CLIENT_SECRET", None) or getattr(const, "CLIENT_SECRET", None)
 
-        def run_setup():
-            setup_oauth("oauth.json", open_browser=False)
+        if not cid or not csec:
+            # Try from oauth module
+            oauth_mod = importlib.import_module("ytmusicapi.auth.oauth")
+            cid = cid or getattr(oauth_mod, "YT_CLIENT_ID", None)
+            csec = csec or getattr(oauth_mod, "YT_CLIENT_SECRET", None)
 
-        thread = threading.Thread(target=run_setup, daemon=True)
-        thread.start()
+        if not cid or not csec:
+            auth_state["error"] = "Could not find OAuth credentials"
+            return
 
-        # Wait a bit for the URL/code to be printed
-        time.sleep(3)
-        sys.stdout = old_out
+        import requests as req
+        resp = req.post("https://oauth2.googleapis.com/device/code", data={
+            "client_id": cid,
+            "scope": "https://www.googleapis.com/auth/youtube"
+        }, timeout=10)
+        cd = resp.json()
+        auth_state["url"] = cd.get("verification_url", "https://www.google.com/device")
+        auth_state["code"] = cd.get("user_code", "")
+        dc = cd.get("device_code", "")
+        interval = cd.get("interval", 5)
 
-        out = buf.getvalue()
-        for line in out.split("\n"):
-            l = line.strip()
-            if "http" in l.lower() and "google" in l.lower():
-                auth_state["url"] = l
-            if ":" in l and len(l) > 5 and len(l) < 30:
-                parts = l.split(":")
-                if len(parts) >= 2:
-                    code = parts[-1].strip()
-                    if "-" in code:
-                        auth_state["code"] = code
-
-        if not auth_state["url"]:
-            auth_state["url"] = "https://www.google.com/device"
-
-        logger.info(f"OAuth URL: {auth_state['url']}")
-
-        # Wait for the file to appear (setup_oauth polls in background)
         for _ in range(120):
-            time.sleep(5)
-            if os.path.exists("oauth.json"):
+            time.sleep(interval)
+            resp = req.post("https://oauth2.googleapis.com/token", data={
+                "client_id": cid, "client_secret": csec,
+                "device_code": dc, "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
+            }, timeout=10)
+            data = resp.json()
+            if resp.status_code == 200:
+                with open("oauth.json", "w") as f:
+                    json.dump({"access_token": data["access_token"],
+                               "refresh_token": data.get("refresh_token", ""),
+                               "expires_in": data.get("expires_in", 3600),
+                               "scope": data.get("scope", ""),
+                               "token_type": data.get("token_type", "Bearer")}, f)
                 auth_state["done"] = True
                 _init_yt()
                 return
-
-        auth_state["error"] = "Timeout waiting for authentication"
+            if data.get("error") == "access_denied":
+                auth_state["error"] = "Access denied"
+                return
     except Exception as e:
         auth_state["error"] = f"{type(e).__name__}: {str(e)[:100]}"
 
