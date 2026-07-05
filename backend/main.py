@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
-import yt_dlp
 import uvicorn
 import logging
 
@@ -13,14 +12,6 @@ app = FastAPI(title="GiftBubble Music API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 yt = YTMusic()
-
-ydl_opts = {
-    "format": "bestaudio/best",
-    "quiet": True,
-    "no_warnings": True,
-    "extract_flat": False,
-    "skip_download": True,
-}
 
 @app.get("/search")
 def search(q: str = ""):
@@ -71,28 +62,15 @@ def song(videoId: str = ""):
     if not videoId:
         return JSONResponse(content={"error": "videoId required"}, status_code=400)
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"https://music.youtube.com/watch?v={videoId}", download=False)
-            formats = info.get("formats", [])
-            best = None
-            for f in formats:
-                if f.get("acodec") and f.get("acodec") != "none" and f.get("url"):
-                    best = f
-                    break
-            if not best:
-                for f in formats:
-                    if f.get("url"):
-                        best = f
-                        break
-            return JSONResponse(content={
-                "title": info.get("title", ""),
-                "artist": info.get("artist", info.get("uploader", "")),
-                "thumbnail": info.get("thumbnail", ""),
-                "duration": info.get("duration", 0),
-                "url": best.get("url", "") if best else ""
-            }, status_code=200)
+        data = yt.get_song(videoId)
+        return JSONResponse(content={
+            "title": data.get("videoDetails", {}).get("title", ""),
+            "artist": data.get("videoDetails", {}).get("author", ""),
+            "thumbnail": data.get("videoDetails", {}).get("thumbnail", {}).get("thumbnails", [{}])[0].get("url", ""),
+            "playability": data.get("playabilityStatus", {}).get("status", ""),
+            "reason": data.get("playabilityStatus", {}).get("reason", "")
+        }, status_code=200)
     except Exception as e:
-        logger.error(f"Song error: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/stream")
@@ -100,22 +78,19 @@ def stream(videoId: str = ""):
     if not videoId:
         return JSONResponse(content={"error": "videoId required"}, status_code=400)
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"https://music.youtube.com/watch?v={videoId}", download=False)
-            formats = info.get("formats", [])
-            url = ""
-            for f in formats:
-                if f.get("acodec") and f.get("acodec") != "none" and f.get("url"):
-                    url = f["url"]
-                    break
-            if not url:
-                for f in formats:
-                    if f.get("url"):
-                        url = f["url"]
-                        break
-            return JSONResponse(content={"url": url}, status_code=200)
+        data = yt.get_song(videoId)
+        playability = data.get("playabilityStatus", {}).get("status", "")
+        if playability == "LOGIN_REQUIRED":
+            return JSONResponse(content={"url": "", "needAuth": True}, status_code=200)
+        streaming = data.get("streamingData", {})
+        formats = streaming.get("formats", []) + streaming.get("adaptiveFormats", [])
+        url = ""
+        for f in formats:
+            if f.get("url"):
+                url = f["url"]
+                break
+        return JSONResponse(content={"url": url}, status_code=200)
     except Exception as e:
-        logger.error(f"Stream error: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 if __name__ == "__main__":
