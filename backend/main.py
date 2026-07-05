@@ -72,13 +72,29 @@ def stream(videoId: str = ""):
         return JSONResponse(content={"error": "videoId required"}, status_code=400)
     try:
         data = yt.get_song(videoId)
+        playback = data.get("playbackTracking", {})
         streaming = data.get("streamingData", {})
+        debug = {
+            "has_streaming": bool(streaming),
+            "keys": list(streaming.keys()) if streaming else [],
+            "formats_count": len(streaming.get("formats", [])),
+            "adaptive_count": len(streaming.get("adaptiveFormats", [])),
+            "has_hls": bool(streaming.get("hlsManifestUrl")),
+            "playback_keys": list(playback.keys()) if playback else []
+        }
         formats = streaming.get("formats", []) + streaming.get("adaptiveFormats", [])
         url = ""
         if formats:
-            best = sorted(formats, key=lambda x: x.get("bitrate", 0), reverse=True)[0]
-            url = best.get("url", best.get("signatureCipher", ""))
-        return JSONResponse(content={"url": url}, status_code=200)
+            for f in formats:
+                if f.get("url"):
+                    url = f["url"]
+                    break
+            if not url:
+                for f in formats:
+                    if f.get("signatureCipher"):
+                        url = f["signatureCipher"]
+                        break
+        return JSONResponse(content={"url": url, "debug": debug}, status_code=200)
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
