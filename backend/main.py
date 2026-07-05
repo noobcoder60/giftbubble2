@@ -37,26 +37,12 @@ _init_yt()
 
 def _do_oauth():
     try:
-        import importlib
-        mod = importlib.import_module("ytmusicapi.auth.oauth")
-
-        # Get client credentials from ytmusicapi
-        cid = getattr(mod, "YT_CLIENT_ID", None)
-        csec = getattr(mod, "YT_CLIENT_SECRET", None)
-        if not cid:
-            cid = getattr(mod, "CLIENT_ID", None)
-        if not csec:
-            csec = getattr(mod, "CLIENT_SECRET", None)
-
-        if not cid or not csec:
-            auth_state["error"] = f"No client credentials found in module"
-            return
-
+        from ytmusicapi.auth.oauth import YT_CLIENT_ID, YT_CLIENT_SECRET
         import requests as req
 
         # Step 1: Get device code
         r = req.post("https://oauth2.googleapis.com/device/code", data={
-            "client_id": cid,
+            "client_id": YT_CLIENT_ID,
             "scope": "https://www.googleapis.com/auth/youtube"
         }, timeout=10)
         dc = r.json()
@@ -69,8 +55,8 @@ def _do_oauth():
         for _ in range(120):
             time.sleep(interval)
             r = req.post("https://oauth2.googleapis.com/token", data={
-                "client_id": cid,
-                "client_secret": csec,
+                "client_id": YT_CLIENT_ID,
+                "client_secret": YT_CLIENT_SECRET,
                 "device_code": auth_state["device_code"],
                 "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
             }, timeout=10)
@@ -97,10 +83,8 @@ def debug():
         info["version"] = "?"
     try:
         import importlib
-        mod = importlib.import_module("ytmusicapi")
-        info["top_level"] = [x for x in dir(mod) if not x.startswith("_")]
-        mod2 = importlib.import_module("ytmusicapi.auth")
-        info["auth_attrs"] = [x for x in dir(mod2) if not x.startswith("_")]
+        mod = importlib.import_module("ytmusicapi.auth.oauth")
+        info["oauth_attrs"] = [x for x in dir(mod) if not x.startswith("_")]
     except Exception as e:
         info["error"] = str(e)[:100]
     return JSONResponse(content=info)
