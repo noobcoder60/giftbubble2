@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic, OAuthCredentials
+import requests
 import uvicorn
 import os
 import time
@@ -24,7 +25,7 @@ def _init_yt():
     global yt
     try:
         if os.path.exists("oauth.json"):
-            yt = YTMusic("oauth.json", oauth_credentials=OAuthCredentials(CID, CSEC))
+            yt = YTMusic("oauth.json")
             logger.info("Authenticated YTMusic")
             return
         yt = YTMusic()
@@ -38,9 +39,8 @@ _init_yt()
 
 def _do_oauth():
     try:
-        import requests as req
         # Step 1: get device code
-        r = req.post("https://oauth2.googleapis.com/device/code", data={
+        r = requests.post("https://oauth2.googleapis.com/device/code", data={
             "client_id": CID, "scope": "https://www.googleapis.com/auth/youtube"
         })
         dc = r.json()
@@ -53,7 +53,7 @@ def _do_oauth():
         # Step 2: poll until user authenticates
         for _ in range(120):
             time.sleep(interval)
-            r = req.post("https://oauth2.googleapis.com/token", data={
+            r = requests.post("https://oauth2.googleapis.com/token", data={
                 "client_id": CID, "client_secret": CSEC,
                 "device_code": device_code,
                 "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
