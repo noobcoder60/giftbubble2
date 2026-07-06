@@ -126,32 +126,27 @@ def stream(videoId: str = ""):
     try:
         data = yt.get_song(videoId)
         streaming = data.get("streamingData", {})
-        if not streaming:
-            return JSONResponse(content={"error": "no streamingData", "raw": str(data)[:500]})
-        adaptive = streaming.get("adaptiveFormats", [])
-        url = ""
-        for f in adaptive:
-            if f.get("audioChannelConfig") and f.get("url"):
-                url = f["url"]
-                break
-        if not url:
+        if streaming:
+            for f in streaming.get("adaptiveFormats", []):
+                if f.get("url"):
+                    return JSONResponse(content={"url": f["url"]})
             for f in streaming.get("formats", []):
                 if f.get("url"):
-                    url = f["url"]
-                    break
-        if not url:
-            for f in adaptive:
-                if f.get("url"):
-                    url = f["url"]
-                    break
-        if not url:
-            for f in adaptive:
-                if f.get("signatureCipher"):
-                    url = f["signatureCipher"][:100]
-                    break
-        return JSONResponse(content={"url": url})
+                    return JSONResponse(content={"url": f["url"]})
+    except:
+        pass
+
+    # fallback: yt-dlp
+    try:
+        import subprocess, re
+        url = f"https://www.youtube.com/watch?v={videoId}"
+        cmd = ["python", "-m", "yt_dlp", "--get-url", "-f", "bestaudio[ext=m4a]/bestaudio", "--no-check-certificates", url]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0 and result.stdout.strip():
+            return JSONResponse(content={"url": result.stdout.strip()})
+        return JSONResponse(content={"error": result.stderr[:200]})
     except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        return JSONResponse(content={"error": str(e)[:200]})
 
 @app.get("/auth-url")
 def auth_url():
