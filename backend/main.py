@@ -123,26 +123,30 @@ def home():
 def stream(videoId: str = ""):
     if not videoId:
         return JSONResponse(content={"error": "videoId required"}, status_code=400)
-    try:
-        r = requests.get(f"https://pipedapi.kavin.rocks/streams/{videoId}", timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+    instances = [
+        "https://pipedapi.kavin.rocks",
+        "https://pipedapi.adminforge.de",
+        "https://pipedapi.tokhmi.xyz",
+        "https://pipedapi.syncpundit.io",
+    ]
+    for instance in instances:
         try:
+            r = requests.get(f"{instance}/streams/{videoId}", timeout=10, headers={"User-Agent": "Mozilla/5.0"}, verify=False)
+            if r.status_code != 200: continue
             data = r.json()
+            audios = data.get("audioStreams", [])
+            for a in audios:
+                url = a.get("url", "")
+                if url:
+                    return JSONResponse(content={"url": url, "mimeType": a.get("mimeType", ""), "quality": a.get("quality", "")})
+            videos = data.get("videoStreams", [])
+            for v in videos:
+                url = v.get("url", "")
+                if url:
+                    return JSONResponse(content={"url": url, "quality": v.get("quality", "")})
         except:
-            return JSONResponse(content={"error": "piped not json", "status": r.status_code, "text": r.text[:300]})
-        audios = data.get("audioStreams", [])
-        for a in audios:
-            url = a.get("url", "")
-            if url:
-                return JSONResponse(content={"url": url, "mimeType": a.get("mimeType", ""), "quality": a.get("quality", "")})
-        # fallback: video streams
-        videos = data.get("videoStreams", [])
-        for v in videos:
-            url = v.get("url", "")
-            if url:
-                return JSONResponse(content={"url": url, "quality": v.get("quality", "")})
-        return JSONResponse(content={"error": "no stream from piped", "raw": str(data)[:300]})
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)[:200]})
+            continue
+    return JSONResponse(content={"error": "all piped instances failed"})
 
 @app.get("/auth-url")
 def auth_url():
