@@ -38,17 +38,45 @@ _init_yt()
 
 def _do_oauth():
     try:
-        creds = OAuthCredentials(CID, CSEC)
-        code = creds.get_code()
-        auth_state["url"] = code.get("verification_url", "https://www.google.com/device")
-        auth_state["code"] = code.get("user_code", "")
+        import requests as req
+        # Step 1: get device code
+        r = req.post("https://oauth2.googleapis.com/device/code", data={
+            "client_id": CID, "scope": "https://www.googleapis.com/auth/youtube"
+        })
+        dc = r.json()
+        auth_state["url"] = dc.get("verification_url", "https://www.google.com/device")
+        auth_state["code"] = dc.get("user_code", "")
+        device_code = dc.get("device_code", "")
+        interval = dc.get("interval", 5)
         logger.info(f"OAuth URL: {auth_state['url']}, Code: {auth_state['code']}")
-        token = creds.token_from_code(code)
-        with open("oauth.json", "w") as f:
-            json.dump(token, f, default=vars)
-        logger.info("OAuth token saved")
-        auth_state["done"] = True
-        _init_yt()
+
+        # Step 2: poll until user authenticates
+        for _ in range(120):
+            time.sleep(interval)
+            r = req.post("https://oauth2.googleapis.com/token", data={
+                "client_id": CID, "client_secret": CSEC,
+                "device_code": device_code,
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
+            })
+            data = r.json()
+            if "access_token" in data:
+                with open("oauth.json", "w") as f:
+                    json.dump(data, f)
+                logger.info("OAuth token saved")
+                auth_state["done"] = True
+                _init_yt()
+                return
+            error = data.get("error", "")
+            if error == "authorization_pending":
+                continue
+            if error == "slow_down":
+                interval += 5
+                continue
+            if error:
+                auth_state["error"] = error
+                logger.error(f"OAuth poll error: {error}")
+                return
+        auth_state["error"] = "timeout: user did not authenticate within ~10 min"
     except Exception as e:
         auth_state["error"] = str(e)[:200]
         logger.error(f"OAuth error: {e}")
