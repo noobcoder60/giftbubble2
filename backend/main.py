@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from ytmusicapi import YTMusic, OAuthCredentials
+from ytmusicapi import YTMusic
 import requests
 import uvicorn
 import os
@@ -124,64 +124,20 @@ def stream(videoId: str = ""):
     if not videoId:
         return JSONResponse(content={"error": "videoId required"}, status_code=400)
     try:
-        data = yt.get_song(videoId)
-        streaming = data.get("streamingData", {})
-        if streaming:
-            for f in streaming.get("adaptiveFormats", []):
-                if f.get("url"):
-                    return JSONResponse(content={"url": f["url"]})
-            for f in streaming.get("formats", []):
-                if f.get("url"):
-                    return JSONResponse(content={"url": f["url"]})
-    except:
-        pass
-
-    # fallback: innertube player API via ytmusicapi's own session
-    try:
-        body = {
-            "videoId": videoId,
-            "context": {
-                "client": {
-                    "clientName": "ANDROID",
-                    "clientVersion": "19.09.37",
-                    "androidSdkVersion": 30,
-                    "hl": "en", "gl": "US"
-                }
-            }
-        }
-        # use ytmusicapi's internal headers (includes OAuth if available)
-        headers = yt._headers.copy() if hasattr(yt, '_headers') else {}
-        headers["Content-Type"] = "application/json"
-        api_key = yt._api_key if hasattr(yt, '_api_key') else "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
-        r = requests.post(
-            f"https://www.youtube.com/youtubei/v1/player?key={api_key}",
-            json=body, headers=headers, timeout=15
-        )
+        r = requests.get(f"https://pipedapi.kavin.rocks/streams/{videoId}", timeout=15)
         data = r.json()
-        streaming = data.get("streamingData", {})
-        for f in streaming.get("adaptiveFormats", []):
-            if f.get("url"):
-                return JSONResponse(content={"url": f["url"]})
-        for f in streaming.get("formats", []):
-            if f.get("url"):
-                return JSONResponse(content={"url": f["url"]})
-        # try with web client
-        body["context"]["client"]["clientName"] = "WEB"
-        body["context"]["client"]["clientVersion"] = "2.20231219.04.00"
-        r = requests.post(
-            f"https://www.youtube.com/youtubei/v1/player?key={api_key}",
-            json=body, headers=headers, timeout=15
-        )
-        data = r.json()
-        streaming = data.get("streamingData", {})
-        for f in streaming.get("adaptiveFormats", []):
-            if f.get("url"):
-                return JSONResponse(content={"url": f["url"]})
-        for f in streaming.get("formats", []):
-            if f.get("url"):
-                return JSONResponse(content={"url": f["url"]})
-        ps = data.get("playabilityStatus", {})
-        return JSONResponse(content={"error": "no url from innertube", "status": ps.get("status", ""), "reason": ps.get("reason", ""), "raw": str(data)[:500]})
+        audios = data.get("audioStreams", [])
+        for a in audios:
+            url = a.get("url", "")
+            if url:
+                return JSONResponse(content={"url": url, "mimeType": a.get("mimeType", ""), "quality": a.get("quality", "")})
+        # fallback: video streams
+        videos = data.get("videoStreams", [])
+        for v in videos:
+            url = v.get("url", "")
+            if url:
+                return JSONResponse(content={"url": url, "quality": v.get("quality", "")})
+        return JSONResponse(content={"error": "no stream from piped", "raw": str(data)[:300]})
     except Exception as e:
         return JSONResponse(content={"error": str(e)[:200]})
 
