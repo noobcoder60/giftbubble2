@@ -1,15 +1,13 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from ytmusicapi import YTMusic, setup_oauth, OAuthCredentials
+from ytmusicapi import YTMusic, OAuthCredentials
 import uvicorn
 import os
-import sys
 import time
 import json
 import threading
 import logging
-from io import StringIO
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,43 +38,19 @@ _init_yt()
 
 def _do_oauth():
     try:
-        auth_state["url"] = ""
-        auth_state["code"] = ""
+        creds = OAuthCredentials(CID, CSEC)
+        code = creds.get_code()
+        auth_state["url"] = code.get("verification_url", "https://www.google.com/device")
+        auth_state["code"] = code.get("user_code", "")
 
-        old = sys.stdout
-        buf = StringIO()
-        sys.stdout = buf
+        token = creds.token_from_code(code)
+        with open("oauth.json", "w") as f:
+            json.dump(token, f, default=vars)
 
-        try:
-            setup_oauth(CID, CSEC, "oauth.json", open_browser=False)
-        except EOFError:
-            pass
-        except Exception as e:
-            logger.warning(f"setup_oauth: {e}")
-        finally:
-            sys.stdout = old
-
-        out = buf.getvalue()
-        for line in out.split("\n"):
-            l = line.strip()
-            if "http" in l.lower() and "google" in l.lower():
-                auth_state["url"] = l
-            if ":" in l and len(l) > 5 and len(l) < 30:
-                auth_state["code"] = l.split(":")[-1].strip()
-
-        if os.path.exists("oauth.json"):
-            auth_state["done"] = True
-            _init_yt()
+        auth_state["done"] = True
+        _init_yt()
     except Exception as e:
         auth_state["error"] = str(e)[:100]
-
-def _wait_for_auth():
-    for _ in range(120):
-        time.sleep(5)
-        if os.path.exists("oauth.json"):
-            auth_state["done"] = True
-            _init_yt()
-            return
 
 @app.get("/search")
 def search(q: str = ""):
@@ -116,21 +90,6 @@ def home():
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-@app.get("/song")
-def song(videoId: str = ""):
-    if not videoId:
-        return JSONResponse(content={"error": "videoId required"}, status_code=400)
-    try:
-        data = yt.get_song(videoId)
-        return JSONResponse(content={
-            "title": data.get("videoDetails", {}).get("title", ""),
-            "artist": data.get("videoDetails", {}).get("author", ""),
-            "thumbnail": data.get("videoDetails", {}).get("thumbnail", {}).get("thumbnails", [{}])[0].get("url", ""),
-            "playability": data.get("playabilityStatus", {}).get("status", ""),
-        })
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-
 @app.get("/stream")
 def stream(videoId: str = ""):
     if not videoId:
@@ -156,7 +115,7 @@ def auth_url():
         auth_state["started"] = True
         thread = threading.Thread(target=_do_oauth, daemon=True)
         thread.start()
-        time.sleep(3)
+        time.sleep(2)
     return JSONResponse(content={
         "url": auth_state["url"], "code": auth_state["code"],
         "done": auth_state["done"], "error": auth_state["error"]
