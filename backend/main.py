@@ -136,32 +136,51 @@ def stream(videoId: str = ""):
     except:
         pass
 
-    # fallback: direct YouTube player request with browser headers
+    # fallback: innertube player API via ytmusicapi's own session
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9",
+        body = {
+            "videoId": videoId,
+            "context": {
+                "client": {
+                    "clientName": "ANDROID",
+                    "clientVersion": "19.09.37",
+                    "androidSdkVersion": 30,
+                    "hl": "en", "gl": "US"
+                }
+            }
         }
-        player_url = f"https://www.youtube.com/watch?v={videoId}"
-        r = requests.get(player_url, headers=headers, timeout=15)
-        import re
-        # extract streaming data from ytInitialPlayerResponse
-        match = re.search(r'ytInitialPlayerResponse\s*=\s*({.*?});', r.text, re.DOTALL)
-        if match:
-            import json
-            data = json.loads(match.group(1))
-            streaming = data.get("streamingData", {})
-            for f in streaming.get("adaptiveFormats", []):
-                if f.get("url"):
-                    return JSONResponse(content={"url": f["url"]})
-            for f in streaming.get("formats", []):
-                if f.get("url"):
-                    return JSONResponse(content={"url": f["url"]})
-            # check for cipher
-            for f in streaming.get("adaptiveFormats", []):
-                if f.get("signatureCipher"):
-                    return JSONResponse(content={"cipher": f["signatureCipher"][:200]})
-        return JSONResponse(content={"error": "no url found", "preview": r.text[:500]})
+        # use ytmusicapi's internal headers (includes OAuth if available)
+        headers = yt._headers.copy() if hasattr(yt, '_headers') else {}
+        headers["Content-Type"] = "application/json"
+        api_key = yt._api_key if hasattr(yt, '_api_key') else "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
+        r = requests.post(
+            f"https://www.youtube.com/youtubei/v1/player?key={api_key}",
+            json=body, headers=headers, timeout=15
+        )
+        data = r.json()
+        streaming = data.get("streamingData", {})
+        for f in streaming.get("adaptiveFormats", []):
+            if f.get("url"):
+                return JSONResponse(content={"url": f["url"]})
+        for f in streaming.get("formats", []):
+            if f.get("url"):
+                return JSONResponse(content={"url": f["url"]})
+        # try with web client
+        body["context"]["client"]["clientName"] = "WEB"
+        body["context"]["client"]["clientVersion"] = "2.20231219.04.00"
+        r = requests.post(
+            f"https://www.youtube.com/youtubei/v1/player?key={api_key}",
+            json=body, headers=headers, timeout=15
+        )
+        data = r.json()
+        streaming = data.get("streamingData", {})
+        for f in streaming.get("adaptiveFormats", []):
+            if f.get("url"):
+                return JSONResponse(content={"url": f["url"]})
+        for f in streaming.get("formats", []):
+            if f.get("url"):
+                return JSONResponse(content={"url": f["url"]})
+        return JSONResponse(content={"error": "no url from innertube", "raw": str(data)[:300]})
     except Exception as e:
         return JSONResponse(content={"error": str(e)[:200]})
 
