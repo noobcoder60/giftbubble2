@@ -180,7 +180,8 @@ def stream(videoId: str = ""):
         for f in streaming.get("formats", []):
             if f.get("url"):
                 return JSONResponse(content={"url": f["url"]})
-        return JSONResponse(content={"error": "no url from innertube", "raw": str(data)[:300]})
+        ps = data.get("playabilityStatus", {})
+        return JSONResponse(content={"error": "no url from innertube", "status": ps.get("status", ""), "reason": ps.get("reason", ""), "raw": str(data)[:500]})
     except Exception as e:
         return JSONResponse(content={"error": str(e)[:200]})
 
