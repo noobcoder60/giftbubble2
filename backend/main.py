@@ -124,8 +124,11 @@ def stream(videoId: str = ""):
     if not videoId:
         return JSONResponse(content={"error": "videoId required"}, status_code=400)
     try:
-        r = requests.get(f"https://pipedapi.kavin.rocks/streams/{videoId}", timeout=15)
-        data = r.json()
+        r = requests.get(f"https://pipedapi.kavin.rocks/streams/{videoId}", timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        try:
+            data = r.json()
+        except:
+            return JSONResponse(content={"error": "piped not json", "status": r.status_code, "text": r.text[:300]})
         audios = data.get("audioStreams", [])
         for a in audios:
             url = a.get("url", "")
