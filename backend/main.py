@@ -136,15 +136,32 @@ def stream(videoId: str = ""):
     except:
         pass
 
-    # fallback: yt-dlp
+    # fallback: direct YouTube player request with browser headers
     try:
-        import subprocess, re
-        url = f"https://www.youtube.com/watch?v={videoId}"
-        cmd = ["python", "-m", "yt_dlp", "--get-url", "-f", "bestaudio[ext=m4a]/bestaudio", "--no-check-certificates", url]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode == 0 and result.stdout.strip():
-            return JSONResponse(content={"url": result.stdout.strip()})
-        return JSONResponse(content={"error": result.stderr[:200]})
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        player_url = f"https://www.youtube.com/watch?v={videoId}"
+        r = requests.get(player_url, headers=headers, timeout=15)
+        import re
+        # extract streaming data from ytInitialPlayerResponse
+        match = re.search(r'ytInitialPlayerResponse\s*=\s*({.*?});', r.text, re.DOTALL)
+        if match:
+            import json
+            data = json.loads(match.group(1))
+            streaming = data.get("streamingData", {})
+            for f in streaming.get("adaptiveFormats", []):
+                if f.get("url"):
+                    return JSONResponse(content={"url": f["url"]})
+            for f in streaming.get("formats", []):
+                if f.get("url"):
+                    return JSONResponse(content={"url": f["url"]})
+            # check for cipher
+            for f in streaming.get("adaptiveFormats", []):
+                if f.get("signatureCipher"):
+                    return JSONResponse(content={"cipher": f["signatureCipher"][:200]})
+        return JSONResponse(content={"error": "no url found via direct request"})
     except Exception as e:
         return JSONResponse(content={"error": str(e)[:200]})
 
