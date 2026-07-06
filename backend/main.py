@@ -42,15 +42,16 @@ def _do_oauth():
         code = creds.get_code()
         auth_state["url"] = code.get("verification_url", "https://www.google.com/device")
         auth_state["code"] = code.get("user_code", "")
-
+        logger.info(f"OAuth URL: {auth_state['url']}, Code: {auth_state['code']}")
         token = creds.token_from_code(code)
         with open("oauth.json", "w") as f:
             json.dump(token, f, default=vars)
-
+        logger.info("OAuth token saved")
         auth_state["done"] = True
         _init_yt()
     except Exception as e:
-        auth_state["error"] = str(e)[:100]
+        auth_state["error"] = str(e)[:200]
+        logger.error(f"OAuth error: {e}")
 
 @app.get("/search")
 def search(q: str = ""):
@@ -97,12 +98,29 @@ def stream(videoId: str = ""):
     try:
         data = yt.get_song(videoId)
         streaming = data.get("streamingData", {})
-        formats = streaming.get("formats", []) + streaming.get("adaptiveFormats", [])
+        if not streaming:
+            return JSONResponse(content={"error": "no streamingData", "raw": str(data)[:500]})
+        adaptive = streaming.get("adaptiveFormats", [])
         url = ""
-        for f in formats:
-            if f.get("url"):
+        for f in adaptive:
+            if f.get("audioChannelConfig") and f.get("url"):
                 url = f["url"]
                 break
+        if not url:
+            for f in streaming.get("formats", []):
+                if f.get("url"):
+                    url = f["url"]
+                    break
+        if not url:
+            for f in adaptive:
+                if f.get("url"):
+                    url = f["url"]
+                    break
+        if not url:
+            for f in adaptive:
+                if f.get("signatureCipher"):
+                    url = f["signatureCipher"][:100]
+                    break
         return JSONResponse(content={"url": url})
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
