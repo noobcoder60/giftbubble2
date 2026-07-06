@@ -25,8 +25,8 @@ def _init_yt():
     global yt
     try:
         if os.path.exists("oauth.json"):
-            yt = YTMusic("oauth.json")
-            logger.info("Authenticated YTMusic")
+            yt = YTMusic("oauth.json", clients=["android"])
+            logger.info("Authenticated YTMusic (android client)")
             return
         yt = YTMusic()
         logger.info("Unauthenticated YTMusic")
