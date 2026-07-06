@@ -161,7 +161,7 @@ def stream(videoId: str = ""):
             for f in streaming.get("adaptiveFormats", []):
                 if f.get("signatureCipher"):
                     return JSONResponse(content={"cipher": f["signatureCipher"][:200]})
-        return JSONResponse(content={"error": "no url found via direct request"})
+        return JSONResponse(content={"error": "no url found", "preview": r.text[:500]})
     except Exception as e:
         return JSONResponse(content={"error": str(e)[:200]})
 
