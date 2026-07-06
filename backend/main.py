@@ -143,6 +143,13 @@ def auth_url():
 def auth_status():
     return JSONResponse(content={"done": auth_state["done"], "error": auth_state["error"]})
 
+@app.get("/debug-oauth")
+def debug_oauth():
+    if os.path.exists("oauth.json"):
+        with open("oauth.json") as f:
+            return JSONResponse(content=json.load(f))
+    return JSONResponse(content={"message": "no oauth.json"})
+
 @app.get("/reset-auth")
 def reset_auth():
     if os.path.exists("oauth.json"):
